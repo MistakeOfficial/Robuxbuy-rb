@@ -9,7 +9,7 @@
  * @copyright Copyright (c) 2018-2019
  * @license   https://creativecommons.org/licenses/by/4.0/ Attribution 4.0 International (CC BY 4.0)
  * @link      https://github.com/likecyber/php-truewallet-class
- * @version   1.2.1
+ * @version   2.1.0
 **/
 
 class TrueWallet {
@@ -69,17 +69,16 @@ class TrueWallet {
 		$this->reference_token = is_null($reference_token) ? null : strval($reference_token);
 	}
 
-	public function request ($api_path, $headers = array(), $data = null) {
+	public function request ($method, $endpoint, $headers = array(), $data = null) {
 		$this->data = null;
-		$handle = curl_init($this->mobile_api_gateway.ltrim($api_path, "/"));
+		$handle = curl_init();
 		if (!is_null($data)) {
-			curl_setopt_array($handle, array(
-				CURLOPT_POST => true,
-				CURLOPT_POSTFIELDS => is_array($data) ? json_encode($data) : $data
-			));
+			curl_setopt($handle, CURLOPT_POSTFIELDS, is_array($data) ? json_encode($data) : $data);
 			if (is_array($data)) $headers = array_merge(array("Content-Type" => "application/json"), $headers);
 		}
 		curl_setopt_array($handle, array(
+			CURLOPT_URL => $this->mobile_api_gateway.ltrim($endpoint, "/"),
+			CURLOPT_CUSTOMREQUEST => $method,
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_USERAGENT => "okhttp/3.8.0",
 			CURLOPT_HTTPHEADER => $this->buildHeaders($headers)
@@ -109,7 +108,7 @@ class TrueWallet {
 	public function RequestLoginOTP () {
 		if (!isset($this->credentials["username"]) || !isset($this->credentials["password"]) || !isset($this->credentials["type"])) return false;
 		$timestamp = $this->getTimestamp();
-		$result = $this->request("/api/v1/login/otp/", array(
+		$result = $this->request("POST", "/api/v1/login/otp/", array(
 			"username" => $this->credentials["username"],
 			"password" => sha1($this->credentials["username"].$this->credentials["password"])
 		), array(
@@ -126,7 +125,7 @@ class TrueWallet {
 		if (is_null($otp_reference) && isset($this->data["otp_reference"])) $otp_reference = $this->data["otp_reference"];
 		if (is_null($mobile_number) || is_null($otp_reference)) return false;
 		$timestamp = $this->getTimestamp();
-		$result = $this->request("/api/v1/login/otp/verification/", array(
+		$result = $this->request("POST", "/api/v1/login/otp/verification/", array(
 			"username" => $this->credentials["username"],
 			"password" => sha1($this->credentials["username"].$this->credentials["password"])
 		), array(
@@ -147,7 +146,7 @@ class TrueWallet {
 	public function Login () {
 		if (!isset($this->credentials["username"]) || !isset($this->credentials["password"]) || !isset($this->credentials["type"]) || is_null($this->reference_token)) return false;
 		$timestamp = $this->getTimestamp();
-		$result = $this->request("/api/v1/login/", array(
+		$result = $this->request("POST", "/api/v1/login/", array(
 			"username" => $this->credentials["username"],
 			"password" => sha1($this->credentials["username"].$this->credentials["password"])
 		), array(
@@ -164,17 +163,21 @@ class TrueWallet {
 
 	public function Logout () {
 		if (is_null($this->access_token)) return false;
-		return $this->request("/api/v1/signout/".$this->access_token, array(), "");
+		return $this->request("POST", "/api/v1/signout/".$this->access_token);
 	}
 
 	public function GetProfile () {
 		if (is_null($this->access_token)) return false;
-		return $this->request("/api/v1/profile/".$this->access_token);
+		return $this->request("GET", "/user-profile-composite/v1/users/", array(
+			"Authorization" => $this->access_token
+		));
 	}
 
 	public function GetBalance () {
 		if (is_null($this->access_token)) return false;
-		return $this->request("/api/v1/profile/balance/".$this->access_token);
+		return $this->request("GET", "/user-profile-composite/v1/users/balance/", array(
+			"Authorization" => $this->access_token
+		));
 	}
 
 	public function GetTransaction ($limit = 50, $start_date = null, $end_date = null) {
@@ -182,27 +185,31 @@ class TrueWallet {
 		if (is_null($start_date) && is_null($end_date)) $start_date = date("Y-m-d", strtotime("-30 days") - date("Z") + 25200);
 		if (is_null($end_date)) $end_date = date("Y-m-d", strtotime("+1 day") - date("Z") + 25200);
 		if (is_null($start_date) || is_null($end_date)) return false;
-		return $this->request("/user-profile-composite/v1/users/transactions/history?start_date=".strval($start_date)."&end_date=".strval($end_date)."&limit=".intval($limit), array(
+		return $this->request("GET", "/user-profile-composite/v1/users/transactions/history/?".http_build_query(array(
+			"start_date" => strval($start_date),
+			"end_date" => strval($end_date),
+			"limit" => intval($limit)
+		)), array(
 			"Authorization" => $this->access_token
 		));
 	}
 
 	public function GetTransactionReport ($report_id) {
 		if (is_null($this->access_token)) return false;
-		return $this->request("/user-profile-composite/v1/users/transactions/history/detail/".intval($report_id), array(
+		return $this->request("GET", "/user-profile-composite/v1/users/transactions/history/detail/".intval($report_id), array(
 			"Authorization" => $this->access_token
 		));
 	}
 
 	public function TopupCashcard ($cashcard) {
 		if (is_null($this->access_token)) return false;
-		return $this->request("/api/v1/topup/mobile/".time()."/".$this->access_token."/cashcard/".strval($cashcard), array(), "");
+		return $this->request("POST", "/api/v1/topup/mobile/".time()."/".$this->access_token."/cashcard/".strval($cashcard));
 	}
 
 	public function DraftTransferP2P ($mobile_number, $amount) {
 		if (is_null($this->access_token)) return false;
 		$timestamp = $this->getTimestamp();
-		return $this->request("/api/v1/transfer/draft-transaction/", array(
+		return $this->request("POST", "/transfer-composite/v1/p2p-transfer/draft-transactions/", array(
 			"Authorization" => $this->access_token
 		), array(
 			"amount" => number_format(str_replace(",", "", strval($amount)), 2, ".", ""),
@@ -212,20 +219,116 @@ class TrueWallet {
 		));
 	}
 
-	public function ConfirmTransferP2P ($personal_message = "", $draft_transaction_id = null, $reference_key = null) {
+	public function ConfirmTransferP2P ($personal_message = "", $wait_processing = true, $draft_transaction_id = null, $reference_key = null) {
 		if (is_null($this->access_token)) return false;
-		if (is_null($draft_transaction_id) && isset($this->data["draftTransactionID"])) $draft_transaction_id = $this->data["draftTransactionID"];
-		if (is_null($reference_key) && isset($this->data["referenceKey"])) $reference_key = $this->data["referenceKey"];
+		if (is_null($draft_transaction_id) && isset($this->data["draft_transaction_id"])) $draft_transaction_id = $this->data["draft_transaction_id"];
+		if (is_null($reference_key) && isset($this->data["reference_key"])) $reference_key = $this->data["reference_key"];
 		if (is_null($draft_transaction_id) || is_null($reference_key)) return false;
 		$timestamp = $this->getTimestamp();
-		return $this->request("/api/v1/transfer/transaction/".$draft_transaction_id, array(
+		$result = $this->request("PUT", "/transfer-composite/v1/p2p-transfer/draft-transactions/".$draft_transaction_id, array(
 			"Authorization" => $this->access_token
 		), array(
-			"personalMessage" => strval($personal_message),
-			"referenceKey" => strval($reference_key),
+			"personal_message" => strval($personal_message),
 			"timestamp" => $timestamp,
-			"signature" => hash_hmac("sha1", implode("|", array(strval($personal_message), strval($reference_key), $timestamp)), $this->secret_key)
+			"signature" => hash_hmac("sha1", implode("|", array(strval($personal_message), $timestamp)), $this->secret_key)
 		));
+		if (isset($result["data"]["transaction_id"])) {
+			$transaction_id = $result["data"]["transaction_id"];
+			$timestamp = $this->getTimestamp();
+			$result = $this->request("POST", "/transfer-composite/v1/p2p-transfer/transactions/".$transaction_id."/", array(
+				"Authorization" => $this->access_token
+			), array(
+				"reference_key" => strval($reference_key),
+				"timestamp" => $timestamp,
+				"signature" => hash_hmac("sha1", implode("|", array(strval($reference_key), $timestamp)), $this->secret_key)
+			));
+			if ($wait_processing) {
+				for ($i = 0; $i < 10; $i++) {
+					if (isset($result["data"]["transfer_status"])) {
+						if ($result["data"]["transfer_status"] === "PROCESSING") {
+							if ($i > 0) sleep(1);
+							$result = $this->request("GET", "/transfer-composite/v1/p2p-transfer/transactions/".$transaction_id."/status/", array(
+								"Authorization" => $this->access_token
+							));
+						} else {
+							break;
+						}
+					} else {
+						break;
+					}
+				}
+			}
+			if (isset($result["data"]["transfer_status"])) {
+				$this->data["transaction_id"] = $transaction_id;
+			}
+		}
+		return $result;
+	}
+
+	public function GetDetailTransferP2P ($transaction_id = null) {
+		if (is_null($this->access_token)) return false;
+		if (is_null($transaction_id) && isset($this->data["transaction_id"])) $transaction_id = $this->data["transaction_id"];
+		if (is_null($transaction_id)) return false;
+		$timestamp = $this->getTimestamp();
+		return $this->request("GET", "/transfer-composite/v1/p2p-transfer/transactions/".$transaction_id."/detail/", array(
+			"Authorization" => $this->access_token
+		));
+	}
+
+	public function DraftBuyCashcard ($amount, $mobile_number) {
+		if (is_null($this->access_token)) return false;
+		$timestamp = $this->getTimestamp();
+		return $this->request("POST", "/api/v1/buy/e-pin/draft/verifyAndCreate/".$this->access_token, array(), array(
+			"amount" => str_replace(",", "", strval($amount)),
+			"recipientMobileNumber" => str_replace(array("-", " "), "", strval($mobile_number)),
+			"timestamp" => $timestamp,
+			"signature" => hash_hmac("sha1", implode("|", array(str_replace(",", "", strval($amount)), str_replace(array("-", " "), "", strval($mobile_number)), $timestamp)), $this->secret_key)
+		));
+	}
+
+	public function ConfirmBuyCashcard ($otp_code, $wait_processing = true, $draft_transaction_id = null, $mobile_number = null, $otp_reference = null) {
+		if (is_null($this->access_token)) return false;
+		if (is_null($draft_transaction_id) && isset($this->data["draftTransactionID"])) $draft_transaction_id = $this->data["draftTransactionID"];
+		if (is_null($mobile_number) && isset($this->data["mobileNumber"])) $mobile_number = $this->data["mobileNumber"];
+		if (is_null($otp_reference) && isset($this->data["otpRefCode"])) $otp_reference = $this->data["otpRefCode"];
+		if (is_null($draft_transaction_id) || is_null($mobile_number) || is_null($otp_reference)) return false;
+		$timestamp = $this->getTimestamp();
+		$result = $this->request("PUT", "/api/v1/buy/e-pin/confirm/".$draft_transaction_id."/".$this->access_token, array(), array(
+			"mobileNumber" => str_replace(array("-", " "), "", strval($mobile_number)),
+			"otpRefCode" => strval($otp_reference),
+			"otpString" => strval($otp_code),
+			"timestamp" => $timestamp,
+			"signature" => hash_hmac("sha1", implode("|", array(str_replace(array("-", " "), "", strval($mobile_number)), strval($otp_reference), strval($otp_code), $timestamp)), $this->secret_key)
+		));
+		if (isset($result["data"]["status"]) && $result["data"]["status"] === "VERIFIED") {
+			$transaction_id = $draft_transaction_id;
+			if ($wait_processing) {
+				for ($i = 0; $i < 10; $i++) {
+					if (isset($result["data"]["status"])) {
+						if ($result["data"]["status"] === "VERIFIED" || $result["data"]["status"] === "PROCESSING") {
+							if ($i > 0) sleep(1);
+							$result = $this->request("GET", "/api/v1/buy/e-pin/".$transaction_id."/status/".$this->access_token);
+						} else {
+							break;
+						}
+					} else {
+						break;
+					}
+				}
+			}
+			if (isset($result["data"]["status"])) {
+				$this->data["transaction_id"] = $transaction_id;
+			}
+		}
+		return $result;
+	}
+	
+	public function GetDetailBuyCashcard ($transaction_id = null) {
+		if (is_null($this->access_token)) return false;
+		if (is_null($transaction_id) && isset($this->data["transaction_id"])) $transaction_id = $this->data["transaction_id"];
+		if (is_null($transaction_id)) return false;
+		$timestamp = $this->getTimestamp();
+		return $this->request("GET", "/api/v1/buy/e-pin/".$transaction_id."/details/".$this->access_token);
 	}
 }
 
